@@ -415,10 +415,10 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 				continue
 			}
 
-			attribute := attributes[args[1]]
+			attribute, ok := attributes[args[1]]
 
-			// continue if the attribute was not included in the request
-			if attribute == nil {
+			// continue if the attribute key was not included in the request payload
+			if !ok {
 				continue
 			}
 
@@ -456,16 +456,21 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 				json.NewEncoder(buf).Encode(data.Relationships[args[1]]) //nolint:errcheck
 				json.NewDecoder(buf).Decode(relationship)                //nolint:errcheck
 
-				data := relationship.Data
+				relData := relationship.Data
 
-				// This will hold either the value of the slice of choice type models or
-				// the slice of models, depending on the annotation
+				// This will hold the slice of models
 				models := reflect.New(sliceType).Elem()
 
-				for _, n := range data {
-					// This will hold either the value of the choice type model or the actual
-					// model, depending on annotation
-					m := reflect.New(sliceType.Elem().Elem())
+				// Determine the element type (strip pointer if present)
+				elemType := sliceType.Elem()
+				isPtrSlice := elemType.Kind() == reflect.Ptr
+				if isPtrSlice {
+					elemType = elemType.Elem()
+				}
+
+				for _, n := range relData {
+					// Always allocate a pointer to the target struct type so unmarshalNode can populate it
+					m := reflect.New(elemType)
 
 					err = unmarshalNodeMaybeChoice(&m, n, annotation, choiceMapping, included)
 					if err != nil {
@@ -473,7 +478,12 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 						break
 					}
 
-					models = reflect.Append(models, m)
+					// If slice expects values ([]T) rather than pointers ([]*T), dereference m
+					if isPtrSlice {
+						models = reflect.Append(models, m)
+					} else {
+						models = reflect.Append(models, m.Elem())
+					}
 				}
 
 				fieldValue.Set(models)
@@ -495,17 +505,25 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 					er = fmt.Errorf("Could not unmarshal json: %w", relationshipDecodeErr)
 				}
 
-				// This will hold either the value of the choice type model or the actual
-				// model, depending on annotation
-				m := reflect.New(fieldValue.Type().Elem())
+				fieldTypeType := fieldType.Type
+				isPtr := fieldTypeType.Kind() == reflect.Ptr
 
-				// Nullable relationships have an extra pointer indirection
-				// unwind that here
-				if strings.HasPrefix(fieldType.Type.Name(), "NullableRelationship[") {
-					if m.Kind() == reflect.Ptr {
-						m = reflect.New(fieldValue.Type().Elem().Elem())
+				// Determine target struct type
+				targetType := fieldTypeType
+				if isPtr {
+					targetType = fieldTypeType.Elem()
+				}
+
+				// Handle NullableRelationship[T] unwinding
+				if strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[") {
+					if targetType.Kind() == reflect.Ptr {
+						targetType = targetType.Elem()
 					}
 				}
+
+				// Create a pointer to the target struct type so unmarshalNode can populate it
+				m := reflect.New(targetType)
+
 				/*
 					http://jsonapi.org/format/#document-resource-object-relationships
 					http://jsonapi.org/format/#document-resource-object-linkage
@@ -515,7 +533,7 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 				if relationship.Data == nil {
 					// Explicit null supplied for the field value
 					// If a nullable relationship we set the field value to a map with a single entry
-					if isExplicitNull && strings.HasPrefix(fieldType.Type.Name(), "NullableRelationship[") {
+					if isExplicitNull && strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[") {
 						fieldValue.Set(reflect.MakeMapWithSize(fieldValue.Type(), 1))
 						fieldValue.SetMapIndex(reflect.ValueOf(false), m)
 					}
@@ -524,7 +542,6 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 
 				// If the field is also a polyrelation field, then prefer the polyrelation.
 				// Otherwise stop processing this node.
-				// This is to allow relation and polyrelation fields to coexist, supporting deprecation for consumers
 				if pFieldType, ok := polyrelationFields[args[1]]; ok && fieldValue.Type() != pFieldType {
 					continue
 				}
@@ -535,11 +552,13 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 					break
 				}
 
-				if strings.HasPrefix(fieldType.Type.Name(), "NullableRelationship[") {
+				if strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[") {
 					fieldValue.Set(reflect.MakeMapWithSize(fieldValue.Type(), 1))
 					fieldValue.SetMapIndex(reflect.ValueOf(true), m)
-				} else {
+				} else if isPtr {
 					fieldValue.Set(m)
+				} else {
+					fieldValue.Set(m.Elem())
 				}
 			}
 		} else if annotation == annotationLinks {
