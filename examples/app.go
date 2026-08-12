@@ -10,7 +10,7 @@ import (
 	"net/http/httptest"
 	"time"
 
-	"github.com/hashicorp/jsonapi"
+	"github.com/rootlyhq/jsonapi"
 )
 
 func main() {
