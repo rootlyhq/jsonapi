@@ -449,7 +449,7 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 			if isSlice {
 				// to-many relationship
 				relationship := new(RelationshipManyNode)
-				sliceType := fieldValue.Type()
+				sliceType := fieldValue.Type() // e.g. []ScheduleRotationMember or []*ScheduleRotationMember
 
 				buf := bytes.NewBuffer(nil)
 
