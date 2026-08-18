@@ -449,7 +449,7 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 			if isSlice {
 				// to-many relationship
 				relationship := new(RelationshipManyNode)
-				sliceType := fieldValue.Type() // e.g. []ScheduleRotationMember or []*ScheduleRotationMember
+				sliceType := fieldValue.Type()
 
 				buf := bytes.NewBuffer(nil)
 
@@ -751,7 +751,9 @@ func handleNullable(
 	}
 
 	if a, ok := attribute.(string); ok && a == "null" {
-		return reflect.ValueOf(nil), nil
+		fieldValue.Set(reflect.MakeMapWithSize(fieldValue.Type(), 1))
+		fieldValue.SetMapIndex(reflect.ValueOf(false), reflect.Zero(fieldValue.Type().Elem()))
+		return fieldValue, nil
 	}
 
 	innerType := fieldValue.Type().Elem()
@@ -767,8 +769,19 @@ func handleNullable(
 		return reflect.ValueOf(nil), err
 	}
 
-	// Downstream handlers (like handleNumeric) may return a pointer to the primitive value.
-	// Dereference it if innerType is not a pointer type.
+	if attrVal.IsValid() && innerType.Kind() == reflect.Slice && attrVal.Kind() == reflect.Slice {
+		if attrVal.Type() != innerType {
+			// Re-encode and decode via JSON to force correct Go slice typing (e.g. []interface{} -> []int64)
+			buf, err := json.Marshal(attribute)
+			if err == nil {
+				typedSlice := reflect.New(innerType)
+				if err := json.Unmarshal(buf, typedSlice.Interface()); err == nil {
+					attrVal = typedSlice.Elem()
+				}
+			}
+		}
+	}
+
 	if attrVal.Kind() == reflect.Ptr && innerType.Kind() != reflect.Ptr {
 		attrVal = attrVal.Elem()
 	}
