@@ -422,6 +422,12 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 				continue
 			}
 
+			// Only NullableAttr distinguishes an explicit null from an absent key;
+			// other fields are left at their zero value
+			if attribute == nil && !strings.HasPrefix(fieldValue.Type().Name(), "NullableAttr[") {
+				continue
+			}
+
 			structField := fieldType
 			value, err := unmarshalAttribute(attribute, args, structField, fieldValue)
 			if err != nil {
@@ -506,19 +512,19 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 				}
 
 				fieldTypeType := fieldType.Type
-				isPtr := fieldTypeType.Kind() == reflect.Ptr
+				isNullable := strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[")
+
+				// For NullableRelationship[T], the value type is T rather than the map itself
+				valueType := fieldTypeType
+				if isNullable {
+					valueType = fieldTypeType.Elem()
+				}
+				isPtr := valueType.Kind() == reflect.Ptr
 
 				// Determine target struct type
-				targetType := fieldTypeType
+				targetType := valueType
 				if isPtr {
-					targetType = fieldTypeType.Elem()
-				}
-
-				// Handle NullableRelationship[T] unwinding
-				if strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[") {
-					if targetType.Kind() == reflect.Ptr {
-						targetType = targetType.Elem()
-					}
+					targetType = valueType.Elem()
 				}
 
 				// Create a pointer to the target struct type so unmarshalNode can populate it
@@ -533,9 +539,9 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 				if relationship.Data == nil {
 					// Explicit null supplied for the field value
 					// If a nullable relationship we set the field value to a map with a single entry
-					if isExplicitNull && strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[") {
+					if isExplicitNull && isNullable {
 						fieldValue.Set(reflect.MakeMapWithSize(fieldValue.Type(), 1))
-						fieldValue.SetMapIndex(reflect.ValueOf(false), m)
+						fieldValue.SetMapIndex(reflect.ValueOf(false), reflect.Zero(valueType))
 					}
 					continue
 				}
@@ -552,7 +558,10 @@ func unmarshalNode(data *Node, model reflect.Value, included *map[string]*Node) 
 					break
 				}
 
-				if strings.HasPrefix(fieldTypeType.Name(), "NullableRelationship[") {
+				if isNullable {
+					if !isPtr {
+						m = m.Elem()
+					}
 					fieldValue.Set(reflect.MakeMapWithSize(fieldValue.Type(), 1))
 					fieldValue.SetMapIndex(reflect.ValueOf(true), m)
 				} else if isPtr {
