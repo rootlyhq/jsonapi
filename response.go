@@ -234,7 +234,7 @@ func hasJSONAPIAnnotations(t reflect.Type) bool {
 }
 
 func visitModelNodeAttribute(args []string, node *Node, fieldValue reflect.Value) error {
-	var omitEmpty, iso8601, rfc3339 bool
+	var omitEmpty, iso8601, rfc3339, isNullable bool
 
 	if len(args) > 2 {
 		for _, arg := range args[2:] {
@@ -272,12 +272,17 @@ func visitModelNodeAttribute(args []string, node *Node, fieldValue reflect.Value
 			return nil
 		}
 		fieldValue = val
+		isNullable = true
+
+		// An explicitly set value must always be marshaled, even if it is the
+		// zero value; omitempty only applies to unspecified NullableAttrs.
+		omitEmpty = false
 	}
 
 	if fieldValue.Type() == reflect.TypeOf(time.Time{}) {
 		t := fieldValue.Interface().(time.Time)
 
-		if t.IsZero() {
+		if t.IsZero() && !isNullable {
 			return nil
 		}
 

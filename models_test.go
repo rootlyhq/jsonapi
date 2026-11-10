@@ -47,6 +47,21 @@ type WithNullableAttrs struct {
 	NullableComment NullableRelationship[*Comment] `jsonapi:"relation,nullable_comment,omitempty"`
 }
 
+// WithNullableAttrTags exercises NullableAttr with each supported tag
+// variant. jsonapi does not recognise `omitzero`, so it behaves like no tag.
+type WithNullableAttrTags struct {
+	ID              int                     `jsonapi:"primary,with-nullable-tags"`
+	String          NullableAttr[string]    `jsonapi:"attr,string"`
+	StringOmitEmpty NullableAttr[string]    `jsonapi:"attr,string_omitempty,omitempty"`
+	StringOmitZero  NullableAttr[string]    `jsonapi:"attr,string_omitzero,omitzero"`
+	Bool            NullableAttr[bool]      `jsonapi:"attr,bool"`
+	BoolOmitEmpty   NullableAttr[bool]      `jsonapi:"attr,bool_omitempty,omitempty"`
+	BoolOmitZero    NullableAttr[bool]      `jsonapi:"attr,bool_omitzero,omitzero"`
+	Time            NullableAttr[time.Time] `jsonapi:"attr,time,rfc3339"`
+	TimeOmitEmpty   NullableAttr[time.Time] `jsonapi:"attr,time_omitempty,rfc3339,omitempty"`
+	TimeOmitZero    NullableAttr[time.Time] `jsonapi:"attr,time_omitzero,rfc3339,omitzero"`
+}
+
 type Car struct {
 	ID    *string `jsonapi:"primary,cars"`
 	Make  *string `jsonapi:"attr,make,omitempty"`

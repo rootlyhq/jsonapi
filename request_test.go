@@ -403,12 +403,11 @@ func TestUnmarshalNullableAttr_Int64(t *testing.T) {
 			wantSpecified: false,
 			wantNull:      false,
 		},
-		// A JSON null for a NullableAttr field is indistinguishable from a missing key—both result in unspecified.
 		{
-			desc:          "int64_explicit_null_treated_as_unspecified",
+			desc:          "int64_explicit_null",
 			attrs:         map[string]interface{}{"name": "Name", "int64": nil},
-			wantSpecified: false,
-			wantNull:      false,
+			wantSpecified: true,
+			wantNull:      true,
 		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -458,12 +457,11 @@ func TestUnmarshalNullableAttr_String(t *testing.T) {
 			wantSpecified: false,
 			wantNull:      false,
 		},
-		// Explicit JSON null for a NullableAttr results in unspecified (same as absent key).
 		{
-			desc:          "string_explicit_null_treated_as_unspecified",
+			desc:          "string_explicit_null",
 			attrs:         map[string]interface{}{"name": "Name", "string_val": nil},
-			wantSpecified: false,
-			wantNull:      false,
+			wantSpecified: true,
+			wantNull:      true,
 		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
@@ -486,6 +484,137 @@ func TestUnmarshalNullableAttr_String(t *testing.T) {
 				}
 				if got, want := v, tc.wantValue; got != want {
 					t.Fatalf("Get(): got %v, want %v", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestUnmarshalNullableAttr_OmitTags(t *testing.T) {
+	type state int
+	const (
+		unspecified state = iota
+		null
+		value
+	)
+
+	for _, tc := range []struct {
+		desc      string
+		attrs     map[string]interface{}
+		want      state
+		wantValue string
+	}{
+		{
+			desc:  "key_absent",
+			attrs: map[string]interface{}{},
+			want:  unspecified,
+		},
+		{
+			desc: "explicit_null",
+			attrs: map[string]interface{}{
+				"string":           nil,
+				"string_omitempty": nil,
+				"string_omitzero":  nil,
+			},
+			want: null,
+		},
+		{
+			desc: "non_zero_value",
+			attrs: map[string]interface{}{
+				"string":           "hello",
+				"string_omitempty": "hello",
+				"string_omitzero":  "hello",
+			},
+			want:      value,
+			wantValue: "hello",
+		},
+		{
+			desc: "zero_value",
+			attrs: map[string]interface{}{
+				"string":           "",
+				"string_omitempty": "",
+				"string_omitzero":  "",
+			},
+			want:      value,
+			wantValue: "",
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			payload := &OnePayload{
+				Data: &Node{
+					ID:         "1",
+					Type:       "with-nullable-tags",
+					Attributes: tc.attrs,
+				},
+			}
+			buf := bytes.NewBuffer(nil)
+			if err := json.NewEncoder(buf).Encode(payload); err != nil {
+				t.Fatal(err)
+			}
+
+			out := new(WithNullableAttrTags)
+			if err := UnmarshalPayload(buf, out); err != nil {
+				t.Fatal(err)
+			}
+
+			for name, field := range map[string]NullableAttr[string]{
+				"string":           out.String,
+				"string_omitempty": out.StringOmitEmpty,
+				"string_omitzero":  out.StringOmitZero,
+			} {
+				if got, want := field.IsSpecified(), tc.want != unspecified; got != want {
+					t.Errorf("%s: IsSpecified(): got %v, want %v", name, got, want)
+				}
+				if got, want := field.IsNull(), tc.want == null; got != want {
+					t.Errorf("%s: IsNull(): got %v, want %v", name, got, want)
+				}
+				if tc.want == value {
+					v, err := field.Get()
+					if err != nil {
+						t.Errorf("%s: Get(): %v", name, err)
+					} else if v != tc.wantValue {
+						t.Errorf("%s: Get(): got %q, want %q", name, v, tc.wantValue)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestNullableAttr_OmitTags_RoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		desc  string
+		input NullableAttr[string]
+	}{
+		{desc: "unspecified", input: nil},
+		{desc: "null", input: NewNullNullableAttr[string]()},
+		{desc: "value", input: NewNullableAttrWithValue("hello")},
+		{desc: "zero_value", input: NewNullableAttrWithValue("")},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			in := &WithNullableAttrTags{
+				ID:              1,
+				String:          tc.input,
+				StringOmitEmpty: tc.input,
+				StringOmitZero:  tc.input,
+			}
+			buf := bytes.NewBuffer(nil)
+			if err := MarshalPayload(buf, in); err != nil {
+				t.Fatal(err)
+			}
+
+			out := new(WithNullableAttrTags)
+			if err := UnmarshalPayload(buf, out); err != nil {
+				t.Fatal(err)
+			}
+
+			for name, field := range map[string]NullableAttr[string]{
+				"string":           out.String,
+				"string_omitempty": out.StringOmitEmpty,
+				"string_omitzero":  out.StringOmitZero,
+			} {
+				if !reflect.DeepEqual(field, tc.input) {
+					t.Errorf("%s: got %#v, want %#v", name, field, tc.input)
 				}
 			}
 		})

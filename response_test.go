@@ -1343,6 +1343,145 @@ func TestNullableAttr_Int64(t *testing.T) {
 	}
 }
 
+func TestNullableAttr_OmitTags(t *testing.T) {
+	aTime := time.Date(2016, 8, 17, 8, 27, 12, 0, time.UTC)
+
+	unspecifiedString := NullableAttr[string]{}
+	unspecifiedString.SetUnspecified()
+	unspecifiedBool := NullableAttr[bool]{}
+	unspecifiedBool.SetUnspecified()
+	unspecifiedTime := NullableAttr[time.Time]{}
+	unspecifiedTime.SetUnspecified()
+
+	for _, tc := range []struct {
+		desc  string
+		input *WithNullableAttrTags
+		// want maps attribute key to its expected JSON value. A key missing
+		// from want must be absent from the payload.
+		want map[string]interface{}
+	}{
+		{
+			desc:  "nil_map_is_omitted",
+			input: &WithNullableAttrTags{ID: 1},
+			want:  map[string]interface{}{},
+		},
+		{
+			desc: "set_unspecified_is_omitted",
+			input: &WithNullableAttrTags{
+				ID:              1,
+				String:          unspecifiedString,
+				StringOmitEmpty: unspecifiedString,
+				StringOmitZero:  unspecifiedString,
+				Bool:            unspecifiedBool,
+				BoolOmitEmpty:   unspecifiedBool,
+				BoolOmitZero:    unspecifiedBool,
+				Time:            unspecifiedTime,
+				TimeOmitEmpty:   unspecifiedTime,
+				TimeOmitZero:    unspecifiedTime,
+			},
+			want: map[string]interface{}{},
+		},
+		{
+			desc: "set_null_is_null",
+			input: &WithNullableAttrTags{
+				ID:              1,
+				String:          NewNullNullableAttr[string](),
+				StringOmitEmpty: NewNullNullableAttr[string](),
+				StringOmitZero:  NewNullNullableAttr[string](),
+				Bool:            NewNullNullableAttr[bool](),
+				BoolOmitEmpty:   NewNullNullableAttr[bool](),
+				BoolOmitZero:    NewNullNullableAttr[bool](),
+				Time:            NewNullNullableAttr[time.Time](),
+				TimeOmitEmpty:   NewNullNullableAttr[time.Time](),
+				TimeOmitZero:    NewNullNullableAttr[time.Time](),
+			},
+			want: map[string]interface{}{
+				"string":           nil,
+				"string_omitempty": nil,
+				"string_omitzero":  nil,
+				"bool":             nil,
+				"bool_omitempty":   nil,
+				"bool_omitzero":    nil,
+				"time":             nil,
+				"time_omitempty":   nil,
+				"time_omitzero":    nil,
+			},
+		},
+		{
+			desc: "non_zero_value_is_present",
+			input: &WithNullableAttrTags{
+				ID:              1,
+				String:          NewNullableAttrWithValue("hello"),
+				StringOmitEmpty: NewNullableAttrWithValue("hello"),
+				StringOmitZero:  NewNullableAttrWithValue("hello"),
+				Bool:            NewNullableAttrWithValue(true),
+				BoolOmitEmpty:   NewNullableAttrWithValue(true),
+				BoolOmitZero:    NewNullableAttrWithValue(true),
+				Time:            NewNullableAttrWithValue(aTime),
+				TimeOmitEmpty:   NewNullableAttrWithValue(aTime),
+				TimeOmitZero:    NewNullableAttrWithValue(aTime),
+			},
+			want: map[string]interface{}{
+				"string":           "hello",
+				"string_omitempty": "hello",
+				"string_omitzero":  "hello",
+				"bool":             true,
+				"bool_omitempty":   true,
+				"bool_omitzero":    true,
+				"time":             aTime.Format(time.RFC3339),
+				"time_omitempty":   aTime.Format(time.RFC3339),
+				"time_omitzero":    aTime.Format(time.RFC3339),
+			},
+		},
+		{
+			// An explicitly set zero value is distinct from unspecified and
+			// must not be dropped by omitempty.
+			desc: "zero_value_is_present",
+			input: &WithNullableAttrTags{
+				ID:              1,
+				String:          NewNullableAttrWithValue(""),
+				StringOmitEmpty: NewNullableAttrWithValue(""),
+				StringOmitZero:  NewNullableAttrWithValue(""),
+				Bool:            NewNullableAttrWithValue(false),
+				BoolOmitEmpty:   NewNullableAttrWithValue(false),
+				BoolOmitZero:    NewNullableAttrWithValue(false),
+				Time:            NewNullableAttrWithValue(time.Time{}),
+				TimeOmitEmpty:   NewNullableAttrWithValue(time.Time{}),
+				TimeOmitZero:    NewNullableAttrWithValue(time.Time{}),
+			},
+			want: map[string]interface{}{
+				"string":           "",
+				"string_omitempty": "",
+				"string_omitzero":  "",
+				"bool":             false,
+				"bool_omitempty":   false,
+				"bool_omitzero":    false,
+				"time":             time.Time{}.Format(time.RFC3339),
+				"time_omitempty":   time.Time{}.Format(time.RFC3339),
+				"time_omitzero":    time.Time{}.Format(time.RFC3339),
+			},
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			out := bytes.NewBuffer(nil)
+			if err := MarshalPayload(out, tc.input); err != nil {
+				t.Fatal(err)
+			}
+			var root map[string]interface{}
+			if err := json.Unmarshal(out.Bytes(), &root); err != nil {
+				t.Fatal(err)
+			}
+			attrs, _ := root["data"].(map[string]interface{})["attributes"].(map[string]interface{})
+			if attrs == nil {
+				attrs = map[string]interface{}{}
+			}
+			if !reflect.DeepEqual(attrs, tc.want) {
+				t.Fatalf("attributes: got %v, want %v", attrs, tc.want)
+			}
+		})
+	}
+}
+
 func TestSupportsLinkable(t *testing.T) {
 	testModel := &Blog{
 		ID:        5,
